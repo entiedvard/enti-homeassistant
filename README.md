@@ -1,4 +1,4 @@
-# Home Assistant
+# Astra Home Assistant
 
 © 2026 Enti_Edvard
 

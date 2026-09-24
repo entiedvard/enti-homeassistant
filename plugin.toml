@@ -1,6 +1,6 @@
 [plugin]
 id = "enti-homeassistant"
-name = "Home Assistant"
+name = "Astra Home Assistant"
 version = "0.1.0"
 description = "Управление устройствами и сервисами Home Assistant из Astra."
 author = "Enti_Edvard"
