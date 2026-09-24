@@ -1,0 +1,37 @@
+[plugin]
+id = "enti-homeassistant"
+name = "Home Assistant"
+version = "0.1.0"
+description = "Управление устройствами и сервисами Home Assistant из Astra."
+author = "Enti_Edvard"
+license = "MIT"
+
+[entry]
+command = "target/release/enti_homeassistant"
+
+[capabilities]
+tools = true
+
+# Плагин подключается к вашему Home Assistant напрямую и не вызывает RPC-хост Astra.
+[permissions]
+
+[config]
+schema = """
+{
+  "type": "object",
+  "properties": {
+    "home_assistant_url": {
+      "type": "string",
+      "title": "Home Assistant WebSocket URL",
+      "description": "Например: ws://homeassistant.local:8123/api/websocket или wss://example.duckdns.org/api/websocket",
+      "default": ""
+    },
+    "access_token": {
+      "type": "string",
+      "title": "Long-Lived Access Token",
+      "description": "Токен Home Assistant. Не вставляйте его в файлы проекта или сообщения.",
+      "default": ""
+    }
+  }
+}
+"""

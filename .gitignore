@@ -1,0 +1,6 @@
+# Build artifacts
+*.astraplugin
+target/
+
+# Legacy local configuration may contain a Home Assistant access token.
+config.toml
