@@ -143,7 +143,7 @@ pub fn create_plugin(
         PluginManifest::new(
             "homeassistant".to_string(),
             "Home Assistant".to_string(),
-            "0.1.0".to_string(),
+            "0.1.1".to_string(),
             "Home Assistant integration plugin".to_string(),
         );
 

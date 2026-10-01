@@ -1,7 +1,7 @@
 [plugin]
 id = "enti-homeassistant"
 name = "Astra Home Assistant"
-version = "0.1.0"
+version = "0.1.1"
 description = "Управление устройствами и сервисами Home Assistant из Astra."
 author = "Enti_Edvard"
 license = "MIT"
@@ -11,9 +11,12 @@ command = "target/release/enti_homeassistant"
 
 [capabilities]
 tools = true
+ui_contributions = true
+dom_access = true
 
 # Плагин подключается к вашему Home Assistant напрямую и не вызывает RPC-хост Astra.
 [permissions]
+dom_access = { reason = "Показывает интерактивную панель Home Assistant внутри интерфейса Astra." }
 
 [config]
 schema = """
@@ -31,6 +34,12 @@ schema = """
       "title": "Long-Lived Access Token",
       "description": "Токен Home Assistant. Не вставляйте его в файлы проекта или сообщения.",
       "default": ""
+    },
+    "track_state_changes": {
+      "type": "boolean",
+      "title": "Проверять изменения для журнала раз в 10 минут",
+      "description": "Отключено по умолчанию. При включении плагин сравнивает состояния каждые 10 минут без постоянной подписки; промежуточные изменения между проверками не попадут в журнал.",
+      "default": false
     }
   }
 }

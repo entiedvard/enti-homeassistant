@@ -1,7 +1,11 @@
 use astra_plugin_sdk::ToolError;
 use astra_plugin_sdk::prelude::*;
 use futures_util::{SinkExt, StreamExt};
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -64,6 +68,134 @@ impl HomeAssistantClient {
             .find(|state| state.value["entity_id"].as_str() == Some(entity_id))
             .ok_or_else(|| ToolError::NotFound(format!("Сущность {entity_id} не найдена")))
     }
+    pub async fn dashboard_states(&self) -> Result<Vec<Entity>, ToolError> {
+        tokio::time::timeout(
+            Duration::from_secs(REQUEST_TIMEOUT_SECONDS),
+            self.dashboard_states_inner(),
+        )
+        .await
+        .map_err(|_| {
+            ToolError::Timeout("Истекло общее время выполнения команды Home Assistant".into())
+        })?
+    }
+    async fn dashboard_states_inner(&self) -> Result<Vec<Entity>, ToolError> {
+        let mut connection = self.connect().await?;
+        let states = connection.request(json!({ "type": "get_states" })).await?;
+        let areas = connection
+            .request(json!({ "type": "config/area_registry/list" }))
+            .await?;
+        let devices = connection
+            .request(json!({ "type": "config/device_registry/list" }))
+            .await?;
+        let entities = connection
+            .request(json!({ "type": "config/entity_registry/list" }))
+            .await?;
+        let areas = registry_array(&areas, "config/area_registry/list")?;
+        let devices = registry_array(&devices, "config/device_registry/list")?;
+        let entities = registry_array(&entities, "config/entity_registry/list")?;
+        let area_metadata: HashMap<_, _> = areas
+            .iter()
+            .filter_map(|area| {
+                Some((
+                    area["area_id"].as_str()?.to_owned(),
+                    (
+                        area["name"].as_str()?.to_owned(),
+                        area["icon"].as_str().map(ToOwned::to_owned),
+                    ),
+                ))
+            })
+            .collect();
+        let device_areas: HashMap<_, _> = devices
+            .iter()
+            .filter_map(|device| {
+                Some((
+                    device["id"].as_str()?.to_owned(),
+                    device["area_id"].as_str()?.to_owned(),
+                ))
+            })
+            .collect();
+        let entity_areas: HashMap<_, _> = entities
+            .iter()
+            .filter_map(|entity| {
+                let entity_id = entity["entity_id"].as_str()?.to_owned();
+                let area_id = entity["area_id"]
+                    .as_str()
+                    .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        entity["device_id"]
+                            .as_str()
+                            .and_then(|device_id| device_areas.get(device_id).cloned())
+                    })?;
+                Some((entity_id, area_id))
+            })
+            .collect();
+        let entity_platforms: HashMap<_, _> = entities
+            .iter()
+            .filter_map(|entity| {
+                Some((
+                    entity["entity_id"].as_str()?.to_owned(),
+                    entity["platform"].as_str()?.to_owned(),
+                ))
+            })
+            .collect();
+        let entity_icons: HashMap<_, _> = entities
+            .iter()
+            .filter_map(|entity| {
+                Some((
+                    entity["entity_id"].as_str()?.to_owned(),
+                    entity["icon"].as_str()?.to_owned(),
+                ))
+            })
+            .collect();
+        let entity_noise: HashMap<_, _> = entities
+            .iter()
+            .filter_map(|entity| {
+                let entity_id = entity["entity_id"].as_str()?.to_owned();
+                let category = entity["entity_category"].as_str();
+                Some((
+                    entity_id,
+                    entity["hidden_by"].is_string()
+                        || entity["disabled_by"].is_string()
+                        || matches!(category, Some("config") | Some("diagnostic")),
+                ))
+            })
+            .collect();
+        let states = registry_array(&states, "get_states")?;
+        Ok(states
+            .iter()
+            .cloned()
+            .map(|mut value| {
+                if let Some(entity_id) = value["entity_id"].as_str().map(ToOwned::to_owned) {
+                    if let Some(platform) = entity_platforms.get(&entity_id) {
+                        value["platform"] = json!(platform);
+                    }
+                    if entity_noise.get(&entity_id) == Some(&true) {
+                        value["ui_hidden"] = json!(true);
+                    }
+                    let attribute_icon = value["attributes"]["icon"].clone();
+                    if attribute_icon.is_null() {
+                        if let Some(icon) = entity_icons.get(&entity_id) {
+                            value["icon"] = json!(icon);
+                        }
+                    } else {
+                        value["icon"] = attribute_icon;
+                    }
+                    if let Some(area_id) = entity_areas.get(&entity_id) {
+                        value["area_id"] = json!(area_id);
+                        let (area_name, area_icon) = area_metadata
+                            .get(area_id)
+                            .cloned()
+                            .unwrap_or_else(|| (area_id.clone(), None));
+                        value["area_name"] = json!(area_name);
+                        if let Some(area_icon) = area_icon {
+                            value["area_icon"] = json!(area_icon);
+                        }
+                    }
+                }
+                Entity { value }
+            })
+            .collect())
+    }
     pub async fn call_service(&self, call: ServiceCall<'_>) -> Result<(), ToolError> {
         tokio::time::timeout(
             Duration::from_secs(REQUEST_TIMEOUT_SECONDS),
@@ -81,6 +213,7 @@ impl HomeAssistantClient {
         }
         self.connect().await?.request(request).await.map(|_| ())
     }
+    #[cfg(test)]
     pub async fn listen_state_changes(&self, cache: StateChangeCache) -> Result<(), ToolError> {
         let mut connection = self.connect().await?;
         connection
@@ -139,6 +272,11 @@ impl<'a> ServiceCall<'a> {
 }
 
 impl Entity {
+    #[cfg(test)]
+    pub fn from_value(value: JsonValue) -> Self {
+        Self { value }
+    }
+
     pub fn domain(&self) -> String {
         self.value["entity_id"]
             .as_str()
@@ -158,11 +296,44 @@ impl Entity {
         entity_id.contains(query) || friendly_name.contains(query)
     }
     pub fn summary(&self) -> JsonValue {
-        json!({ "entity_id": self.value["entity_id"], "friendly_name": self.value["attributes"]["friendly_name"], "state": self.value["state"] })
+        let state = if self.value["attributes"]["device_class"] == "temperature" {
+            self.value["state"]
+                .as_str()
+                .and_then(|value| value.parse::<f64>().ok())
+                .map(|value| json!(format!("{value:.1}")))
+                .unwrap_or_else(|| self.value["state"].clone())
+        } else {
+            self.value["state"].clone()
+        };
+        json!({
+            "entity_id": self.value["entity_id"],
+            "friendly_name": self.value["attributes"]["friendly_name"],
+            "state": state,
+            "area_id": self.value["area_id"],
+            "area_name": self.value["area_name"],
+            "area_icon": self.value["area_icon"],
+            "platform": self.value["platform"],
+            "ui_hidden": self.value["ui_hidden"],
+            "icon": self.value["icon"],
+            "brightness": self.value["attributes"]["brightness"],
+            "unit_of_measurement": self.value["attributes"]["unit_of_measurement"],
+            "device_class": self.value["attributes"]["device_class"]
+        })
     }
     pub fn full(&self) -> JsonValue {
         self.value.clone()
     }
+}
+
+fn registry_array<'a>(
+    value: &'a JsonValue,
+    request: &str,
+) -> Result<&'a Vec<JsonValue>, ToolError> {
+    value.as_array().ok_or_else(|| {
+        ToolError::Internal(format!(
+            "Home Assistant вернул некорректный ответ {request}"
+        ))
+    })
 }
 
 struct Connection {
@@ -374,6 +545,50 @@ mod tests {
         server.await.expect("server task");
     }
 
+    #[test]
+    fn summary_formats_temperature_to_one_decimal() {
+        let temperature = Entity::from_value(json!({
+            "entity_id": "sensor.temperature",
+            "state": "21.26",
+            "attributes": {
+                "device_class": "temperature",
+                "unit_of_measurement": "°C"
+            }
+        }));
+        assert_eq!(temperature.summary()["state"], "21.3");
+
+        let negative_temperature = Entity::from_value(json!({
+            "entity_id": "sensor.outdoor_temperature",
+            "state": "-3.24",
+            "attributes": { "device_class": "temperature" }
+        }));
+        assert_eq!(negative_temperature.summary()["state"], "-3.2");
+
+        let whole_temperature = Entity::from_value(json!({
+            "entity_id": "sensor.room_temperature",
+            "state": "21",
+            "attributes": { "device_class": "temperature" }
+        }));
+        assert_eq!(whole_temperature.summary()["state"], "21.0");
+    }
+
+    #[test]
+    fn summary_keeps_non_numeric_temperature_states_and_other_sensors_unchanged() {
+        let unavailable = Entity::from_value(json!({
+            "entity_id": "sensor.temperature",
+            "state": "unavailable",
+            "attributes": { "device_class": "temperature" }
+        }));
+        assert_eq!(unavailable.summary()["state"], "unavailable");
+
+        let humidity = Entity::from_value(json!({
+            "entity_id": "sensor.humidity",
+            "state": "45.678",
+            "attributes": { "device_class": "humidity" }
+        }));
+        assert_eq!(humidity.summary()["state"], "45.678");
+    }
+
     #[tokio::test]
     async fn subscribes_to_state_changes_and_caches_events() {
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -447,6 +662,102 @@ mod tests {
         let events = cache.lock().await;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]["data"]["entity_id"], "sensor.temperature");
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn dashboard_states_assigns_entities_to_home_assistant_areas() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let address = listener.local_addr().expect("mock server address");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept client");
+            let mut socket = accept_async(stream).await.expect("upgrade websocket");
+            socket
+                .send(Message::Text(
+                    json!({ "type": "auth_required" }).to_string().into(),
+                ))
+                .await
+                .expect("send auth_required");
+            socket
+                .next()
+                .await
+                .expect("auth frame")
+                .expect("valid auth frame");
+            socket
+                .send(Message::Text(
+                    json!({ "type": "auth_ok" }).to_string().into(),
+                ))
+                .await
+                .expect("send auth_ok");
+            let responses = [
+                (
+                    "get_states",
+                    json!([
+                        { "entity_id": "light.kitchen", "state": "on", "attributes": {} },
+                        { "entity_id": "sensor.temperature", "state": "21", "attributes": {} },
+                        { "entity_id": "sensor.uptime", "state": "1", "attributes": {} },
+                        { "entity_id": "automation.welcome", "state": "on", "attributes": {} }
+                    ]),
+                ),
+                (
+                    "config/area_registry/list",
+                    json!([{ "area_id": "kitchen", "name": "Кухня", "icon": "mdi:food-fork-drink" }]),
+                ),
+                (
+                    "config/device_registry/list",
+                    json!([{ "id": "device-1", "area_id": "kitchen" }]),
+                ),
+                (
+                    "config/entity_registry/list",
+                    json!([
+                        { "entity_id": "light.kitchen", "area_id": "kitchen", "icon": "mdi:lightbulb-outline" },
+                        { "entity_id": "sensor.temperature", "device_id": "device-1" },
+                        { "entity_id": "sensor.uptime", "platform": "homeassistant" },
+                        { "entity_id": "automation.welcome", "platform": "automation" }
+                    ]),
+                ),
+            ];
+            for (expected_type, result) in responses {
+                let request = socket
+                    .next()
+                    .await
+                    .expect("registry request")
+                    .expect("valid registry request");
+                let Message::Text(request) = request else {
+                    panic!("expected text request")
+                };
+                let request: JsonValue = serde_json::from_str(&request).expect("request JSON");
+                assert_eq!(request["type"], expected_type);
+                socket
+                    .send(Message::Text(
+                        json!({
+                            "id": request["id"],
+                            "type": "result",
+                            "success": true,
+                            "result": result
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .await
+                    .expect("send registry result");
+            }
+        });
+
+        let states =
+            HomeAssistantClient::new(format!("ws://{address}/api/websocket"), "test-token".into())
+                .dashboard_states()
+                .await
+                .expect("dashboard states");
+        assert_eq!(states.len(), 4);
+        assert_eq!(states[0].full()["area_name"], "Кухня");
+        assert_eq!(states[0].summary()["area_icon"], "mdi:food-fork-drink");
+        assert_eq!(states[0].summary()["icon"], "mdi:lightbulb-outline");
+        assert_eq!(states[1].full()["area_name"], "Кухня");
+        assert_eq!(states[2].full()["platform"], "homeassistant");
+        assert_eq!(states[3].full()["platform"], "automation");
         server.await.expect("server task");
     }
 
