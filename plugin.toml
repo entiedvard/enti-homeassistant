@@ -1,8 +1,8 @@
 [plugin]
 id = "enti-homeassistant"
-name = "Astra Home Assistant"
-version = "0.1.1"
-description = "Управление устройствами и сервисами Home Assistant из Astra."
+name = "Home Assistant Connector"
+version = "0.1.2"
+description = "Connect Astra to Home Assistant to read entity states, control devices, and call services."
 author = "Enti_Edvard"
 license = "MIT"
 

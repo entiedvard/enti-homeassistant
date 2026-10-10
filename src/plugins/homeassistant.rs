@@ -142,9 +142,9 @@ pub fn create_plugin(
     let manifest =
         PluginManifest::new(
             "homeassistant".to_string(),
-            "Home Assistant".to_string(),
-            "0.1.1".to_string(),
-            "Home Assistant integration plugin".to_string(),
+            "Home Assistant Connector".to_string(),
+            "0.1.2".to_string(),
+            "Connect Astra to Home Assistant to read entity states, control devices, and call services.".to_string(),
         );
 
 

@@ -1,8 +1,8 @@
-# Astra Home Assistant
+# Home Assistant Connector
 
 © 2026 Enti_Edvard
 
-Плагин Astra для чтения состояний устройств и вызова сервисов Home Assistant.
+Плагин для подключения Astra к Home Assistant: чтение состояний устройств и вызов сервисов.
 
 ## Возможности
 
