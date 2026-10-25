@@ -16,7 +16,7 @@ dom_access = true
 
 # Плагин подключается к вашему Home Assistant напрямую и не вызывает RPC-хост Astra.
 [permissions]
-dom_access = { reason = "Показывает интерактивную панель Home Assistant внутри интерфейса Astra." }
+dom_access = { reason = "Shows the interactive Home Assistant panel inside the Astra interface." }
 
 [config]
 schema = """

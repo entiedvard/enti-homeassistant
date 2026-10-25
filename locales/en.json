@@ -1,0 +1,4 @@
+{
+  "listing.description": "Connect Astra to Home Assistant to read entity states, control devices, and call services.",
+  "listing.name": "Home Assistant Connector"
+}

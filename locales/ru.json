@@ -1,3 +1,4 @@
 {
-  "listing.description": "Подключает Astra к Home Assistant для чтения состояний сущностей, управления устройствами и вызова сервисов."
+  "listing.description": "Подключает Astra к Home Assistant для чтения состояний сущностей, управления устройствами и вызова сервисов.",
+  "listing.name": "Home Assistant Connector"
 }
