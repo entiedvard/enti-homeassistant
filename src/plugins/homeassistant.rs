@@ -143,7 +143,7 @@ pub fn create_plugin(
         PluginManifest::new(
             "homeassistant".to_string(),
             "Home Assistant Connector".to_string(),
-            "0.1.2".to_string(),
+            "0.1.3".to_string(),
             "Connect Astra to Home Assistant to read entity states, control devices, and call services.".to_string(),
         );
 
